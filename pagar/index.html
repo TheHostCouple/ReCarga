@@ -50,120 +50,69 @@
   <div class="header"><img src="/logo-recarga.png" alt="ReCarga!"></div>
   <div class="body">
 
-    <h2><span class="n">1</span>Elige tu producto</h2>
-    <div id="products"><p class="note">Cargando productos...</p></div>
-
-    <div id="step2" class="hidden">
-      <h2><span class="n">2</span>¿Cómo quieres recargar?</h2>
-      <div class="tabs">
-        <button class="tab sel" id="tabAmount" type="button">Por monto</button>
-        <button class="tab" id="tabVolume" type="button">Por cantidad</button>
-      </div>
-      <div id="options" class="chips"></div>
+    <h2>¿Cuánto quieres recargar?</h2>
+    <div id="options" class="chips"></div>
+    <div id="customBox" class="hidden" style="margin-top:10px">
+      <input id="customIn" type="number" inputmode="numeric" min="500" max="10000" step="100" placeholder="Ej: 3000"
+        style="width:100%;padding:14px;border:1.5px solid #123FCE;border-radius:12px;font-size:17px;font-family:inherit">
+      <div id="customHint" class="note">Entre $500 y $10.000, en múltiplos de $100.</div>
     </div>
+    <p class="note" style="margin-top:10px">Tu saldo quedará en la pantalla de la máquina y podrás usarlo en el producto que prefieras.</p>
 
-    <div id="summary" class="summary hidden">
-      <div class="row"><span>Producto</span><span id="sProd"></span></div>
-      <div class="row"><span>Cantidad aprox.</span><span id="sVol"></span></div>
-      <div class="row tot"><span>Total</span><span id="sTot"></span></div>
-    </div>
-
-    <button id="payBtn" class="pay" type="button" disabled>Pagar con MercadoPago</button>
+    <button id="payBtn" class="pay" type="button" disabled>Elige un monto</button>
     <div id="msg"></div>
-    <div class="note">Pago seguro con MercadoPago. Tu pago se carga como saldo en pesos en la máquina y lo puedes usar en el producto que prefieras.</div>
+    <div class="note">Pago seguro con MercadoPago. Después de pagar, tu saldo aparecerá en la pantalla de la máquina.</div>
 
   </div>
 </div>
 
 <script>
   // ====== EDITAR: pega tu clave pública (anon / publishable) de Supabase ======
-  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRieHVxY3VrY2FxdXVyYm5mbnByIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0MTA2ODIsImV4cCI6MjEwNjk4NjY4Mn0.YSdtXnICisyx1KGQdr7aXSa7MBPPtHBgxvDXu56-etw";
+  const SUPABASE_ANON_KEY = "PEGA-AQUI-TU-ANON-KEY";
   // ===========================================================================
   const SUPABASE_URL  = "https://tbxuqcukcaquurbnfnpr.supabase.co";
   const FUNCTIONS_URL = SUPABASE_URL + "/functions/v1";
 
   // Mismos valores permitidos que en la función del servidor (el servidor los valida de nuevo).
-  const AMOUNTS = [500, 1000, 1500, 2000];     // modo "por monto" (CLP)
-  const VOLUMES = [500, 1000, 2000];            // modo "por cantidad" (ml)
-
-  const COLORS = { omo:"#1E3A8A", quix:"#43A047", ariel:"#4FC3F7", suavizante:"#F7B8D2", limpiapisos:"#8E5FC7" };
+  const AMOUNTS = [1000, 2000, 5000];          // montos fijos (CLP)
+  const MIN = 500, MAX = 10000, STEP = 100;    // monto libre
   const MACHINE_ID = new URLSearchParams(location.search).get("m") || "recarga-01";
-
-  let products = [], product = null, mode = "amount", option = null;
+  let option = null, custom = false;
 
   const clp = n => "$" + Number(n).toLocaleString("es-CL");
-  const volFromAmount = (a, p) => Math.round(a / p * 1000 / 10) * 10;      // ml
-  const amountFromVol = (v, p) => Math.round(p * v / 1000 / 10) * 10;      // CLP
-  const fmtVol = ml => ml >= 1000 ? (ml/1000).toString().replace(".", ",") + " L" : ml + " ml";
 
-  async function loadProducts() {
-    try {
-      const r = await fetch(SUPABASE_URL + "/rest/v1/vending_prices?select=product_code,label,price_clp&order=product_code", {
-        headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY }
-      });
-      if (!r.ok) throw new Error(r.status);
-      products = await r.json();
-      if (!products.length) throw new Error("vacío");
-    } catch (e) {
-      document.getElementById("products").innerHTML = '<p class="note">No pudimos cargar los productos. Recarga la página.</p>';
-      return;
-    }
-    renderProducts();
-  }
-
-  function renderProducts() {
-    const box = document.getElementById("products");
-    box.innerHTML = "";
-    products.forEach(p => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "prod" + (product && product.product_code === p.product_code ? " sel" : "");
-      b.innerHTML = '<span class="dot" style="background:' + (COLORS[p.product_code] || "#999") + '"></span>' +
-        '<span><div class="nm">' + p.label + '</div><div class="pr">' + clp(p.price_clp) + ' por litro</div></span>';
-      b.onclick = () => { product = p; option = null; renderProducts(); renderOptions(); };
-      box.appendChild(b);
-    });
-  }
-
-  function renderOptions() {
-    document.getElementById("step2").classList.toggle("hidden", !product);
-    document.getElementById("tabAmount").classList.toggle("sel", mode === "amount");
-    document.getElementById("tabVolume").classList.toggle("sel", mode === "volume");
+  function render() {
     const box = document.getElementById("options");
     box.innerHTML = "";
-    if (product) {
-      const list = mode === "amount" ? AMOUNTS : VOLUMES;
-      list.forEach(v => {
-        const amount = mode === "amount" ? v : amountFromVol(v, product.price_clp);
-        const ml = mode === "amount" ? volFromAmount(v, product.price_clp) : v;
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "chip" + (option === v ? " sel" : "");
-        b.innerHTML = mode === "amount"
-          ? '<div class="a">' + clp(amount) + '</div><div class="b">≈ ' + fmtVol(ml) + '</div>'
-          : '<div class="a">' + fmtVol(ml) + '</div><div class="b">' + clp(amount) + '</div>';
-        b.onclick = () => { option = v; renderOptions(); };
-        box.appendChild(b);
-      });
-    }
-    renderSummary();
+    AMOUNTS.forEach(v => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip" + (option === v ? " sel" : "");
+      b.innerHTML = '<div class="a">' + clp(v) + '</div>';
+      b.onclick = () => { option = v; custom = false; render(); };
+      box.appendChild(b);
+    });
+    const o = document.createElement("button");
+    o.type = "button";
+    o.className = "chip" + (custom ? " sel" : "");
+    o.innerHTML = '<div class="a">Otro monto</div>';
+    o.onclick = () => { custom = true; option = null; render(); document.getElementById("customIn").focus(); };
+    box.appendChild(o);
+    document.getElementById("customBox").classList.toggle("hidden", !custom);
+    const btn = document.getElementById("payBtn");
+    btn.disabled = option === null;
+    btn.textContent = option === null ? "Elige un monto" : "Pagar " + clp(option) + " con MercadoPago";
   }
 
-  function renderSummary() {
-    const ok = product && option !== null;
-    document.getElementById("summary").classList.toggle("hidden", !ok);
-    document.getElementById("payBtn").disabled = !ok;
-    if (!ok) return;
-    const amount = mode === "amount" ? option : amountFromVol(option, product.price_clp);
-    const ml = mode === "amount" ? volFromAmount(option, product.price_clp) : option;
-    document.getElementById("sProd").textContent = product.label;
-    document.getElementById("sVol").textContent = "≈ " + fmtVol(ml);
-    document.getElementById("sTot").textContent = clp(amount);
-    document.getElementById("payBtn").textContent = "Pagar " + clp(amount) + " con MercadoPago";
-  }
-
-  document.getElementById("tabAmount").onclick = () => { mode = "amount"; option = null; renderOptions(); };
-  document.getElementById("tabVolume").onclick = () => { mode = "volume"; option = null; renderOptions(); };
+  document.getElementById("customIn").addEventListener("input", e => {
+    const v = Number(e.target.value);
+    const ok = Number.isInteger(v) && v >= MIN && v <= MAX && v % STEP === 0;
+    option = ok ? v : null;
+    document.getElementById("customHint").style.color = (e.target.value && !ok) ? "#D52B1E" : "";
+    const btn = document.getElementById("payBtn");
+    btn.disabled = !ok;
+    btn.textContent = ok ? "Pagar " + clp(v) + " con MercadoPago" : "Elige un monto";
+  });
 
   document.getElementById("payBtn").onclick = async () => {
     const msg = document.getElementById("msg");
@@ -172,12 +121,10 @@
     btn.disabled = true;
     btn.textContent = "Creando pago...";
     try {
-      const body = { machine_id: MACHINE_ID, product_code: product.product_code, mode };
-      if (mode === "amount") body.amount_clp = option; else body.volume_ml = option;
       const r = await fetch(FUNCTIONS_URL + "/create-payment-preference", {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
-        body: JSON.stringify(body)
+        body: JSON.stringify({ machine_id: MACHINE_ID, amount_clp: option })
       });
       const data = await r.json();
       if (!r.ok || !data.init_point) throw new Error(data.error || "Error al crear el pago");
@@ -185,11 +132,11 @@
       window.location.href = data.init_point;
     } catch (e) {
       msg.textContent = "No pudimos iniciar el pago. Inténtalo de nuevo o escríbenos por WhatsApp.";
-      renderSummary();
+      render();
     }
   };
 
-  loadProducts();
+  render();
 </script>
 </body>
 </html>
